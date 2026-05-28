@@ -78,7 +78,6 @@ def check_github_repo_name(github_url, last_name, ratio_threshold=70):
     """Check if the repo name's last segment (after last '_') fuzzy matches the last name."""
     url = github_url.strip().rstrip("#").removesuffix(".git")
     repo_name = url.rstrip("/").split("/")[-1]
-    # Extract the part after the last underscore
     suffix = repo_name.rsplit("_", 1)[-1] if "_" in repo_name else repo_name
     ratio = fuzz.ratio(suffix.lower(), last_name.replace(" ", "").replace(".", "").lower())
     partial = fuzz.partial_ratio(suffix.lower(), last_name.replace(" ", "").replace(".", "").lower())
@@ -86,77 +85,85 @@ def check_github_repo_name(github_url, last_name, ratio_threshold=70):
     return is_match, suffix, ratio, partial
 
 
+rows = []
+
 with open("test.csv", newline="", encoding="utf-8") as f:
     reader = csv.DictReader(f)
+    fieldnames = reader.fieldnames + ["Valid", "Remarks"]
     for row in reader:
         obj_id = row["Published Object ID"].strip()
         package_id = row["Package ID"].strip()
         csv_name = f"{row['First name'].strip()} {row['Last name'].strip()}"
+        remarks = []
 
         # Validate Package ID
         if not package_id:
-            print(f"[SKIP PACKAGE] {csv_name} - No Package ID")
-        elif check_package_valid(package_id):
-            print(f"[VALID PACKAGE] {csv_name} - {package_id}")
-        else:
-            print(f"[INVALID PACKAGE] {csv_name} - {package_id}")
+            remarks.append("No Package ID")
+        elif not check_package_valid(package_id):
+            remarks.append("Invalid Package ID")
 
-        # Validate Published Object ID and name
+        # Validate Published Object ID
         if not obj_id:
-            print(f"[SKIP OBJECT] {csv_name} - No Object ID")
-            continue
+            remarks.append("No Object ID")
+        else:
+            fields = check_object_valid(obj_id)
+            if fields is None:
+                remarks.append("Invalid Object ID")
+            else:
+                # Validate wallet owns the published object
+                wallet = row["Active Sui wallet address"].strip()
+                if not wallet:
+                    remarks.append("No wallet address")
+                else:
+                    owns = check_wallet_owns_object(wallet, obj_id)
+                    if owns is None:
+                        remarks.append("Could not verify wallet ownership")
+                    elif not owns:
+                        remarks.append("Wallet does not own the object")
 
-        fields = check_object_valid(obj_id)
-        if fields is None:
-            print(f"[INVALID OBJECT] {csv_name} - {obj_id}")
-            continue
+                # Validate name match
+                onchain_name = fields.get("name")
+                if not onchain_name:
+                    remarks.append("Object has no name field")
+                else:
+                    is_match, ratio, partial = check_name_match(csv_name, onchain_name)
+                    if not is_match:
+                        remarks.append(f"Name mismatch (CSV: '{csv_name}' vs On-chain: '{onchain_name}')")
 
         # Validate Vercel URL
         vercel_url = row["Live Portfolio Vercel URL"].strip()
         if not vercel_url or vercel_url.lower() in ("n/a", "na"):
-            print(f"[SKIP VERCEL] {csv_name} - No Vercel URL")
-        elif check_vercel_valid(vercel_url):
-            print(f"[VALID VERCEL] {csv_name} - {vercel_url}")
-        else:
-            print(f"[INVALID VERCEL] {csv_name} - {vercel_url}")
+            remarks.append("No Vercel URL")
+        elif not check_vercel_valid(vercel_url):
+            remarks.append("Invalid Vercel URL (not vercel.app or unreachable)")
 
         # Validate DeepSurge profile link
         deepsurge_url = row["DeepSurge project link"].strip()
         if not deepsurge_url or deepsurge_url.lower() in ("n/a", "na"):
-            print(f"[SKIP DEEPSURGE] {csv_name} - No DeepSurge URL")
-        elif check_deepsurge_valid(deepsurge_url):
-            print(f"[VALID DEEPSURGE] {csv_name} - {deepsurge_url}")
-        else:
-            print(f"[INVALID DEEPSURGE] {csv_name} - {deepsurge_url}")
+            remarks.append("No DeepSurge URL")
+        elif not check_deepsurge_valid(deepsurge_url):
+            remarks.append("Invalid DeepSurge URL (not deepsurge.xyz or unreachable)")
 
         # Validate GitHub repository link
         github_url = row["GitHub repository link"].strip()
         if not github_url:
-            print(f"[SKIP GITHUB] {csv_name} - No GitHub URL")
+            remarks.append("No GitHub URL")
         else:
             last_name = row["Last name"].strip()
             is_match, suffix, ratio, partial = check_github_repo_name(github_url, last_name)
-            status = "GITHUB MATCH" if is_match else "GITHUB MISMATCH"
-            print(f"[{status}] Repo suffix: '{suffix}' | Last name: '{last_name}' | ratio={ratio} partial={partial}")
+            if not is_match:
+                remarks.append(f"GitHub repo name mismatch ('{suffix}' vs '{last_name}')")
 
-        # Validate wallet owns the published object
-        wallet = row["Active Sui wallet address"].strip()
-        if not wallet:
-            print(f"[SKIP WALLET] {csv_name} - No wallet address")
-        else:
-            owns = check_wallet_owns_object(wallet, obj_id)
-            if owns is None:
-                print(f"[WALLET CHECK FAILED] {csv_name} - Could not verify ownership")
-            elif owns:
-                print(f"[WALLET MATCH] {csv_name} - Wallet owns the object")
-            else:
-                print(f"[WALLET MISMATCH] {csv_name} - Wallet does NOT own the object")
+        valid = len(remarks) == 0
+        row["Valid"] = valid
+        row["Remarks"] = "; ".join(remarks) if remarks else ""
+        rows.append(row)
+        print(f"{'✓' if valid else '✗'} {csv_name} - {row['Remarks'] or 'All checks passed'}")
 
-        onchain_name = fields.get("name")
-        if not onchain_name:
-            print(f"[NO NAME] {csv_name} - Object exists but has no name field")
-            continue
+# Write results CSV
+with open("results.csv", "w", newline="", encoding="utf-8") as f:
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
 
-        is_match, ratio, partial = check_name_match(csv_name, onchain_name)
-        status = "MATCH" if is_match else "MISMATCH"
-        print(f"[{status}] CSV: '{csv_name}' | On-chain: '{onchain_name}' | ratio={ratio} partial={partial}")
+print(f"\nResults written to results.csv ({len(rows)} rows)")
