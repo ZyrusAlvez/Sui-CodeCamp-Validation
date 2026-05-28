@@ -5,22 +5,24 @@ from fuzzywuzzy import fuzz
 SUI_RPC = "https://fullnode.mainnet.sui.io:443"
 
 
-def get_object(obj_id):
-    """Fetch object data from Sui RPC. Returns content dict or None."""
+def get_object(obj_id, show_content=True, show_owner=False):
+    """Fetch object data from Sui RPC."""
+    options = {"showContent": show_content, "showOwner": show_owner}
     resp = requests.post(SUI_RPC, json={
         "jsonrpc": "2.0", "id": 1,
         "method": "sui_getObject",
-        "params": [obj_id, {"showContent": True}]
+        "params": [obj_id, options]
     }, timeout=15)
     data = resp.json()
     if "error" in data or "error" in data.get("result", {}):
         return None
-    return data.get("result", {}).get("data", {}).get("content")
+    return data.get("result", {}).get("data")
 
 
 def check_object_valid(obj_id):
     """Check if the object ID exists on-chain as a moveObject. Returns fields or None."""
-    content = get_object(obj_id)
+    data = get_object(obj_id)
+    content = data.get("content") if data else None
     if content and content.get("dataType") == "moveObject":
         return content.get("fields")
     return None
@@ -28,8 +30,18 @@ def check_object_valid(obj_id):
 
 def check_package_valid(package_id):
     """Check if the package ID exists on-chain as a valid package. Returns True/False."""
-    content = get_object(package_id)
+    data = get_object(package_id)
+    content = data.get("content") if data else None
     return content is not None and content.get("dataType") == "package"
+
+
+def check_wallet_owns_object(wallet_address, obj_id):
+    """Check if the wallet address is the owner of the given object. Returns True/False."""
+    data = get_object(obj_id, show_content=False, show_owner=True)
+    if data is None:
+        return None
+    owner = data.get("owner", {}).get("AddressOwner", "")
+    return owner.lower() == wallet_address.lower()
 
 
 def check_name_match(csv_name, onchain_name, ratio_threshold=70, partial_threshold=80):
@@ -64,6 +76,19 @@ with open("test.csv", newline="", encoding="utf-8") as f:
         if fields is None:
             print(f"[INVALID OBJECT] {csv_name} - {obj_id}")
             continue
+
+        # Validate wallet owns the published object
+        wallet = row["Active Sui wallet address"].strip()
+        if not wallet:
+            print(f"[SKIP WALLET] {csv_name} - No wallet address")
+        else:
+            owns = check_wallet_owns_object(wallet, obj_id)
+            if owns is None:
+                print(f"[WALLET CHECK FAILED] {csv_name} - Could not verify ownership")
+            elif owns:
+                print(f"[WALLET MATCH] {csv_name} - Wallet owns the object")
+            else:
+                print(f"[WALLET MISMATCH] {csv_name} - Wallet does NOT own the object")
 
         onchain_name = fields.get("name")
         if not onchain_name:
