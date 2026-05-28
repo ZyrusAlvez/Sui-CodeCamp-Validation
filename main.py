@@ -45,10 +45,23 @@ def check_wallet_owns_object(wallet_address, obj_id):
 
 
 def check_deepsurge_valid(url):
-    """Check if the DeepSurge URL returns a valid page (not 404). Returns True/False."""
+    """Check if the URL is a valid DeepSurge link and returns a valid page. Returns True/False."""
+    if "deepsurge.xyz" not in url.lower():
+        return False
     try:
         resp = requests.get(url, timeout=15, allow_redirects=True)
         return resp.status_code == 200 and "404" not in resp.text[:500]
+    except Exception:
+        return False
+
+
+def check_vercel_valid(url):
+    """Check if the URL is a valid Vercel link and returns 200. Returns True/False."""
+    if "vercel.app" not in url.lower():
+        return False
+    try:
+        resp = requests.get(url, timeout=15, allow_redirects=True)
+        return resp.status_code == 200
     except Exception:
         return False
 
@@ -97,6 +110,15 @@ with open("test.csv", newline="", encoding="utf-8") as f:
         if fields is None:
             print(f"[INVALID OBJECT] {csv_name} - {obj_id}")
             continue
+
+        # Validate Vercel URL
+        vercel_url = row["Live Portfolio Vercel URL"].strip()
+        if not vercel_url or vercel_url.lower() in ("n/a", "na"):
+            print(f"[SKIP VERCEL] {csv_name} - No Vercel URL")
+        elif check_vercel_valid(vercel_url):
+            print(f"[VALID VERCEL] {csv_name} - {vercel_url}")
+        else:
+            print(f"[INVALID VERCEL] {csv_name} - {vercel_url}")
 
         # Validate DeepSurge profile link
         deepsurge_url = row["DeepSurge project link"].strip()
