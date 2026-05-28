@@ -44,6 +44,15 @@ def check_wallet_owns_object(wallet_address, obj_id):
     return owner.lower() == wallet_address.lower()
 
 
+def check_deepsurge_valid(url):
+    """Check if the DeepSurge URL returns a valid page (not 404). Returns True/False."""
+    try:
+        resp = requests.get(url, timeout=15, allow_redirects=True)
+        return resp.status_code == 200 and "404" not in resp.text[:500]
+    except Exception:
+        return False
+
+
 def check_name_match(csv_name, onchain_name, ratio_threshold=70, partial_threshold=80):
     """Fuzzy compare csv_name vs onchain_name. Returns (is_match, ratio, partial_ratio)."""
     ratio = fuzz.ratio(csv_name.lower(), onchain_name.lower())
@@ -88,6 +97,15 @@ with open("test.csv", newline="", encoding="utf-8") as f:
         if fields is None:
             print(f"[INVALID OBJECT] {csv_name} - {obj_id}")
             continue
+
+        # Validate DeepSurge profile link
+        deepsurge_url = row["DeepSurge project link"].strip()
+        if not deepsurge_url or deepsurge_url.lower() in ("n/a", "na"):
+            print(f"[SKIP DEEPSURGE] {csv_name} - No DeepSurge URL")
+        elif check_deepsurge_valid(deepsurge_url):
+            print(f"[VALID DEEPSURGE] {csv_name} - {deepsurge_url}")
+        else:
+            print(f"[INVALID DEEPSURGE] {csv_name} - {deepsurge_url}")
 
         # Validate GitHub repository link
         github_url = row["GitHub repository link"].strip()
