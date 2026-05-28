@@ -52,6 +52,18 @@ def check_name_match(csv_name, onchain_name, ratio_threshold=70, partial_thresho
     return is_match, ratio, partial
 
 
+def check_github_repo_name(github_url, last_name, ratio_threshold=70):
+    """Check if the repo name's last segment (after last '_') fuzzy matches the last name."""
+    url = github_url.strip().rstrip("#").removesuffix(".git")
+    repo_name = url.rstrip("/").split("/")[-1]
+    # Extract the part after the last underscore
+    suffix = repo_name.rsplit("_", 1)[-1] if "_" in repo_name else repo_name
+    ratio = fuzz.ratio(suffix.lower(), last_name.replace(" ", "").replace(".", "").lower())
+    partial = fuzz.partial_ratio(suffix.lower(), last_name.replace(" ", "").replace(".", "").lower())
+    is_match = ratio >= ratio_threshold or partial >= ratio_threshold
+    return is_match, suffix, ratio, partial
+
+
 with open("test.csv", newline="", encoding="utf-8") as f:
     reader = csv.DictReader(f)
     for row in reader:
@@ -76,6 +88,16 @@ with open("test.csv", newline="", encoding="utf-8") as f:
         if fields is None:
             print(f"[INVALID OBJECT] {csv_name} - {obj_id}")
             continue
+
+        # Validate GitHub repository link
+        github_url = row["GitHub repository link"].strip()
+        if not github_url:
+            print(f"[SKIP GITHUB] {csv_name} - No GitHub URL")
+        else:
+            last_name = row["Last name"].strip()
+            is_match, suffix, ratio, partial = check_github_repo_name(github_url, last_name)
+            status = "GITHUB MATCH" if is_match else "GITHUB MISMATCH"
+            print(f"[{status}] Repo suffix: '{suffix}' | Last name: '{last_name}' | ratio={ratio} partial={partial}")
 
         # Validate wallet owns the published object
         wallet = row["Active Sui wallet address"].strip()
