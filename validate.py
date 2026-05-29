@@ -74,15 +74,16 @@ def check_name_match(csv_name, onchain_name, ratio_threshold=70, partial_thresho
     return is_match, ratio, partial
 
 
-def check_github_repo_name(github_url, last_name, ratio_threshold=70):
-    """Check if the repo name's last segment (after last '_') fuzzy matches the last name."""
+def check_github_repo_valid(github_url):
+    """Check if the GitHub repo URL is valid (exists and is on github.com). Returns True/False."""
+    if "github.com" not in github_url.lower():
+        return False
     url = github_url.strip().rstrip("#").removesuffix(".git")
-    repo_name = url.rstrip("/").split("/")[-1]
-    suffix = repo_name.rsplit("_", 1)[-1] if "_" in repo_name else repo_name
-    ratio = fuzz.ratio(suffix.lower(), last_name.replace(" ", "").replace(".", "").lower())
-    partial = fuzz.partial_ratio(suffix.lower(), last_name.replace(" ", "").replace(".", "").lower())
-    is_match = ratio >= ratio_threshold or partial >= ratio_threshold
-    return is_match, suffix, ratio, partial
+    try:
+        resp = requests.get(url, timeout=15, allow_redirects=True)
+        return resp.status_code == 200
+    except Exception:
+        return False
 
 
 rows = []
@@ -148,11 +149,8 @@ with open("test.csv", newline="", encoding="utf-8") as f:
         github_url = row["GitHub repository link"].strip()
         if not github_url:
             remarks.append("No GitHub URL")
-        else:
-            last_name = row["Last name"].strip()
-            is_match, suffix, ratio, partial = check_github_repo_name(github_url, last_name)
-            if not is_match:
-                remarks.append(f"GitHub repo name mismatch ('{suffix}' vs '{last_name}')")
+        elif not check_github_repo_valid(github_url):
+            remarks.append("Invalid GitHub URL (not github.com or unreachable)")
 
         valid = len(remarks) == 0
         row["Valid"] = valid
